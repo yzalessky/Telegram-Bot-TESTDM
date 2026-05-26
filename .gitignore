@@ -1,0 +1,23 @@
+# Секреты
+.env
+.env.local
+credentials.json
+token.json
+
+# Данные пользователей (персональные данные респондентов)
+users/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
