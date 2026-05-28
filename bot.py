@@ -9,6 +9,7 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler,
     MessageHandler,
+    PicklePersistence,
     filters,
 )
 
@@ -52,6 +53,9 @@ logging.getLogger("google_auth_httplib2").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+# Файл с состояниями диалогов — рядом с bot.py, не зависит от папки запуска
+PERSISTENCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.pickle")
+
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Глобальный обработчик исключений — логирует и (если возможно) сообщает пользователю."""
@@ -70,7 +74,8 @@ def main() -> None:
     if not token:
         raise RuntimeError("BOT_TOKEN не задан. Создайте файл .env с BOT_TOKEN=ваш_токен")
 
-    app = Application.builder().token(token).build()
+    persistence = PicklePersistence(filepath=PERSISTENCE_PATH)
+    app = Application.builder().token(token).persistence(persistence).build()
 
     conv = ConversationHandler(
         entry_points=[
@@ -95,6 +100,8 @@ def main() -> None:
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        name="main_conversation",
+        persistent=True,
     )
 
     app.add_handler(conv)
