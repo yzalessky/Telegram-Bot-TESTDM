@@ -126,16 +126,23 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
         sent_ids.append(s.message_id)
 
     header = "<b>Сообщение пользователя:</b>"
+    # Если это ответ на уточнение — первое сообщение делаем reply'ем на вопрос в теме.
+    first_reply = None
+    if entry.get("role") == "clarification_answer":
+        q_msg_id = context.bot_data.get("question_group_msg", {}).get(entry.get("parent_id"))
+        if q_msg_id:
+            first_reply = ReplyParameters(message_id=q_msg_id, allow_sending_without_reply=True)
     try:
         etype = entry.get("type")
         caption = message.caption or None
         if etype == "text":
             await _post(bot.send_message(
                 gid, f"{header}\n\n{html.escape(entry.get('text', ''), quote=False)}",
-                message_thread_id=thread_id, parse_mode="HTML",
+                message_thread_id=thread_id, parse_mode="HTML", reply_parameters=first_reply,
             ))
         else:
-            await _post(bot.send_message(gid, header, message_thread_id=thread_id, parse_mode="HTML"))
+            await _post(bot.send_message(gid, header, message_thread_id=thread_id,
+                                         parse_mode="HTML", reply_parameters=first_reply))
             if message.voice:
                 await _post(bot.send_voice(gid, message.voice.file_id, message_thread_id=thread_id))
             elif message.audio:
@@ -163,7 +170,7 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
         msgmap[mid] = {"user_id": user_id, "feedback_id": feedback_id}
 
 
-async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, parent_id):
+async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, parent_id, question_msg_id=None):
     """Логирует уточняющий вопрос, доставляет респонденту, ставит pending."""
     text = (text or "").strip()
     if not text:
@@ -175,6 +182,9 @@ async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, pare
         "by": "researcher",
     })
     context.bot_data.setdefault("pending_clarification", {})[user_id] = qid
+    # id сообщения-вопроса в группе — чтобы ответ респондента пришёл reply'ем на него
+    if question_msg_id:
+        context.bot_data.setdefault("question_group_msg", {})[qid] = question_msg_id
 
     # Если вопрос привязан к конкретному фидбеку — доставляем reply'ем на исходное
     # сообщение респондента в личке (чтобы он понял, о чём речь).
@@ -235,7 +245,7 @@ async def handle_researcher_message(update: Update, context: ContextTypes.DEFAUL
     else:
         return  # reply на чужое/служебное сообщение → внутреннее, игнор
 
-    await _ask(context, user_id, msg.text, parent_id)
+    await _ask(context, user_id, msg.text, parent_id, question_msg_id=msg.message_id)
 
 
 async def handle_ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -255,4 +265,4 @@ async def handle_ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not text:
         await msg.reply_text("Использование: /ask <текст вопроса>")
         return
-    await _ask(context, user_id, text, parent_id=None)
+    await _ask(context, user_id, text, parent_id=None, question_msg_id=msg.message_id)
