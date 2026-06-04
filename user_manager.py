@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from datetime import datetime
 
 import card_renderer
@@ -23,6 +24,17 @@ def _read_profile(user_id: int) -> dict | None:
         return None
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def get_profile(user_id: int) -> dict | None:
+    """Публичный доступ к профилю (для researcher_bridge и др.)."""
+    return _read_profile(user_id)
+
+
+def new_feedback_id() -> str:
+    """Уникальный id записи фидбека: fb_<timestamp_мс>_<rand>."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    return f"fb_{ts}_{uuid.uuid4().hex[:4]}"
 
 
 def _read_feedback(user_id: int) -> list:
@@ -74,18 +86,21 @@ def media_dir(user_id: int, subfolder: str) -> str:
     return path
 
 
-def append_feedback_entry(user_id: int, entry: dict) -> None:
+def append_feedback_entry(user_id: int, entry: dict) -> str:
+    """Дописывает запись в feedback.jsonl. Гарантирует поле id, возвращает его."""
     create_user_folder(user_id)
     path = os.path.join(_user_dir(user_id), "feedback.jsonl")
-    entry = {**entry, "timestamp": datetime.now().isoformat(timespec="seconds")}
+    fid = entry.get("id") or new_feedback_id()
+    entry = {"id": fid, **entry, "timestamp": datetime.now().isoformat(timespec="seconds")}
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     drive_sync.schedule_upload(path, _drive_relpath(path))
     regenerate_card(user_id)
+    return fid
 
 
-def save_text_feedback(user_id: int, text: str) -> None:
-    append_feedback_entry(user_id, {"type": "text", "text": text})
+def save_text_feedback(user_id: int, text: str) -> str:
+    return append_feedback_entry(user_id, {"type": "text", "text": text})
 
 
 def upload_user_file(local_path: str) -> None:

@@ -13,6 +13,7 @@ from telegram.ext import (
     filters,
 )
 
+import researcher_bridge
 from handlers import (
     cancel,
     get_age,
@@ -79,7 +80,7 @@ def main() -> None:
 
     conv = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex(r"(?i)тестдм"), start_registration)
+            MessageHandler(filters.Regex(r"(?i)тестдм") & filters.ChatType.PRIVATE, start_registration)
         ],
         states={
             WAIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
@@ -105,6 +106,26 @@ def main() -> None:
     )
 
     app.add_handler(conv)
+
+    # Мост исследователей (group=1): команды/сообщения в групповом чате тем.
+    # Подключается только если задан RESEARCHER_GROUP_ID.
+    gid = researcher_bridge.group_id()
+    if gid is not None:
+        app.add_handler(
+            CommandHandler("ask", researcher_bridge.handle_ask_command, filters=filters.Chat(gid)),
+            group=1,
+        )
+        app.add_handler(
+            MessageHandler(
+                filters.Chat(gid) & filters.TEXT & ~filters.COMMAND,
+                researcher_bridge.handle_researcher_message,
+            ),
+            group=1,
+        )
+        logger.info("Мост исследователей включён, group_id=%s", gid)
+    else:
+        logger.info("Мост исследователей выключен (нет RESEARCHER_GROUP_ID)")
+
     app.add_error_handler(_error_handler)
 
     print("Бот запущен. Нажмите Ctrl+C для остановки.")

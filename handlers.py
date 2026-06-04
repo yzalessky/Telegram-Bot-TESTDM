@@ -10,6 +10,7 @@ from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, ConversationHandler
 
 import media_utils
+import researcher_bridge
 import transcriber
 import user_manager
 from states import (
@@ -74,6 +75,19 @@ async def _transcribe_and_record(update: Update, audio_path: str, entry: dict) -
         return "(не удалось распознать речь — детали в логах)"
 
 
+async def _record_and_forward(update: Update, context: ContextTypes.DEFAULT_TYPE, entry: dict) -> str:
+    """Сохраняет запись фидбека. Если ждём ответ на уточнение — помечает её ответом
+    (parent_id + role). Затем пересылает в тему исследователей. Возвращает id записи."""
+    user_id = update.effective_user.id
+    pending = context.bot_data.get("pending_clarification", {})
+    qid = pending.pop(user_id, None) if isinstance(pending, dict) else None
+    if qid:
+        entry = {**entry, "parent_id": qid, "role": "clarification_answer"}
+    fid = user_manager.append_feedback_entry(user_id, entry)
+    await researcher_bridge.forward_feedback(context, user_id, fid, update.message, entry)
+    return fid
+
+
 # --- регистрация ----------------------------------------------------------
 
 async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -85,10 +99,11 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
 
     if user_manager.user_exists(user_id):
+        await researcher_bridge.ensure_topic(context, user_id)
         await update.message.reply_text(
             "Вы уже зарегистрированы!\n\n"
             "Поделитесь своими ощущениями от использования микросервиса — "
-            "можно текстом, голосовым, фото, видео или файлом. /stop чтобы закончить."
+            "можно текстом, голосовым, фото, видео или файлом."
         )
         return WAIT_FEEDBACK
 
@@ -193,12 +208,12 @@ async def _finish_registration(update: Update, context: ContextTypes.DEFAULT_TYP
         "registered_at": datetime.now().isoformat(timespec="seconds"),
     }
     user_manager.save_profile(user.id, profile)
+    await researcher_bridge.ensure_topic(context, user.id)
 
     await update.message.reply_text(
         "✅ Анкета сохранена, спасибо!\n\n"
         "Теперь поделитесь ощущениями от использования микросервиса.\n"
-        "Можно текстом, голосовым, фото, видео или файлом.\n\n"
-        "Когда закончите — /stop.",
+        "Можно текстом, голосовым, фото, видео или файлом.",
         reply_markup=ReplyKeyboardRemove(),
     )
     return WAIT_FEEDBACK
@@ -207,8 +222,8 @@ async def _finish_registration(update: Update, context: ContextTypes.DEFAULT_TYP
 # --- фидбек: текст --------------------------------------------------------
 
 async def receive_text_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user_manager.save_text_feedback(update.effective_user.id, update.message.text.strip())
-    await update.message.reply_text("Записал! Присылайте ещё или /stop.")
+    await _record_and_forward(update, context, {"type": "text", "text": update.message.text.strip()})
+    await update.message.reply_text("Записал! Присылайте ещё.")
     return WAIT_FEEDBACK
 
 
@@ -228,10 +243,10 @@ async def receive_voice_feedback(update: Update, context: ContextTypes.DEFAULT_T
         "duration_sec": voice.duration,
     }
     line = await _transcribe_and_record(update, save_path, entry)
-    user_manager.append_feedback_entry(user_id, entry)
+    await _record_and_forward(update, context, entry)
 
     await update.message.reply_text(
-        f"Голосовое получено ({voice.duration} сек).\n\n{line}\n\nПрисылайте ещё или /stop."
+        f"Голосовое получено ({voice.duration} сек).\n\n{line}\n\nПрисылайте ещё."
     )
     return WAIT_FEEDBACK
 
@@ -240,6 +255,7 @@ async def receive_voice_feedback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def _process_av(
     update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
     media_obj,
     *,
     subfolder: str,
@@ -281,9 +297,9 @@ async def _process_av(
     else:
         line = "(транскрибация отключена — нет YANDEX_API_KEY / YANDEX_FOLDER_ID в .env)"
 
-    user_manager.append_feedback_entry(user_id, entry)
+    await _record_and_forward(update, context, entry)
     await update.message.reply_text(
-        f"{reply_prefix} ({media_obj.duration} сек).\n\n{line}\n\nПрисылайте ещё или /stop."
+        f"{reply_prefix} ({media_obj.duration} сек).\n\n{line}\n\nПрисылайте ещё."
     )
     return WAIT_FEEDBACK
 
@@ -291,7 +307,7 @@ async def _process_av(
 async def receive_audio_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     audio = update.message.audio
     return await _process_av(
-        update, audio,
+        update, context, audio,
         subfolder="audio",
         base_name=f"audio_{_ts()}",
         source_ext=_safe_ext(audio.file_name, ".mp3"),
@@ -304,7 +320,7 @@ async def receive_audio_feedback(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_video_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     video = update.message.video
     return await _process_av(
-        update, video,
+        update, context, video,
         subfolder="video",
         base_name=f"video_{_ts()}",
         source_ext=".mp4",
@@ -316,7 +332,7 @@ async def receive_video_feedback(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_video_note_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     vn = update.message.video_note
     return await _process_av(
-        update, vn,
+        update, context, vn,
         subfolder="video",
         base_name=f"video_note_{_ts()}",
         source_ext=".mp4",
@@ -338,9 +354,9 @@ async def receive_photo_feedback(update: Update, context: ContextTypes.DEFAULT_T
     entry = {"type": "photo", "file": f"photo/{filename}"}
     if update.message.caption:
         entry["caption"] = update.message.caption
-    user_manager.append_feedback_entry(user_id, entry)
+    await _record_and_forward(update, context, entry)
 
-    await update.message.reply_text("Фото получено.\n\nПрисылайте ещё или /stop.")
+    await update.message.reply_text("Фото получено.\n\nПрисылайте ещё.")
     return WAIT_FEEDBACK
 
 
@@ -360,11 +376,11 @@ async def receive_document_feedback(update: Update, context: ContextTypes.DEFAUL
         "file": f"document/{filename}",
         "original_name": doc.file_name,
     }
-    user_manager.append_feedback_entry(user_id, entry)
+    await _record_and_forward(update, context, entry)
 
     display_name = (doc.file_name or "файл")[:100]
     await update.message.reply_text(
-        f"Файл «{display_name}» получен.\n\nПрисылайте ещё или /stop."
+        f"Файл «{display_name}» получен.\n\nПрисылайте ещё."
     )
     return WAIT_FEEDBACK
 
@@ -372,11 +388,13 @@ async def receive_document_feedback(update: Update, context: ContextTypes.DEFAUL
 # --- завершение -----------------------------------------------------------
 
 async def stop_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # Диалог намеренно НЕ завершается: бот остаётся на связи, чтобы в любой момент
+    # принять новый отзыв или ответ на уточняющий вопрос исследователя.
     await update.message.reply_text(
-        "Спасибо за участие! До свидания.\n"
-        "Если захотите добавить отзыв позже — напишите ТЕСТДМ."
+        "Спасибо! Я остаюсь на связи — присылайте новые мысли в любой момент, "
+        "и отвечайте, если что-то уточню."
     )
-    return ConversationHandler.END
+    return WAIT_FEEDBACK
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
