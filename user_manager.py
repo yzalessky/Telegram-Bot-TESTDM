@@ -31,6 +31,14 @@ def get_profile(user_id: int) -> dict | None:
     return _read_profile(user_id)
 
 
+def find_feedback(user_id: int, feedback_id: str) -> dict | None:
+    """Возвращает запись фидбека по id (или None)."""
+    for entry in _read_feedback(user_id):
+        if entry.get("id") == feedback_id:
+            return entry
+    return None
+
+
 def new_feedback_id() -> str:
     """Уникальный id записи фидбека: fb_<timestamp_мс>_<rand>."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]

@@ -79,6 +79,8 @@ async def _record_and_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Сохраняет запись фидбека. Если ждём ответ на уточнение — помечает её ответом
     (parent_id + role). Затем пересылает в тему исследователей. Возвращает id записи."""
     user_id = update.effective_user.id
+    # id сообщения в личном чате — чтобы бот мог reply'ем привязать к нему уточнение
+    entry = {**entry, "chat_message_id": update.message.message_id}
     pending = context.bot_data.get("pending_clarification", {})
     qid = pending.pop(user_id, None) if isinstance(pending, dict) else None
     if qid:

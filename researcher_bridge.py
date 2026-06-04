@@ -16,7 +16,7 @@ bot_data (persisted через PicklePersistence):
 import logging
 import os
 
-from telegram import Update
+from telegram import ReplyParameters, Update
 from telegram.ext import ContextTypes
 
 import user_manager
@@ -166,9 +166,20 @@ async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, pare
     })
     context.bot_data.setdefault("pending_clarification", {})[user_id] = qid
 
+    # Если вопрос привязан к конкретному фидбеку — доставляем reply'ем на исходное
+    # сообщение респондента в личке (чтобы он понял, о чём речь).
+    reply_params = None
+    if parent_id:
+        fb = user_manager.find_feedback(user_id, parent_id)
+        chat_msg_id = fb.get("chat_message_id") if fb else None
+        if chat_msg_id:
+            reply_params = ReplyParameters(message_id=chat_msg_id, allow_sending_without_reply=True)
+
     delivered = True
     try:
-        await context.bot.send_message(user_id, f"💬 Вопрос от исследователя:\n\n{text}")
+        await context.bot.send_message(
+            user_id, f"💬 Вопрос от исследователя:\n\n{text}", reply_parameters=reply_params
+        )
     except Exception:
         delivered = False
         logger.exception("deliver clarification to user %s failed", user_id)
