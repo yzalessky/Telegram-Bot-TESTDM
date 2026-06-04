@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import os
 import re
@@ -28,6 +29,13 @@ logger = logging.getLogger(__name__)
 _GENDER_KB = ReplyKeyboardMarkup([["Мужской", "Женский"]], one_time_keyboard=True, resize_keyboard=True)
 _YES_NO_KB = ReplyKeyboardMarkup([["Да", "Нет"]], one_time_keyboard=True, resize_keyboard=True)
 _EXT_PATTERN = re.compile(r"^[a-zA-Z0-9]{1,10}$")
+_BOT_PREFIX = "<b>Бот-помощник группы исследователей:</b>"
+
+
+async def _bot_reply(message, text: str, **kwargs):
+    """Ответ бота в диалоге ПОСЛЕ регистрации — с подписью-идентификатором."""
+    kwargs.setdefault("parse_mode", "HTML")
+    return await message.reply_text(f"{_BOT_PREFIX}\n\n{html.escape(text, quote=False)}", **kwargs)
 
 
 def _ts() -> str:
@@ -102,7 +110,8 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if user_manager.user_exists(user_id):
         await researcher_bridge.ensure_topic(context, user_id)
-        await update.message.reply_text(
+        await _bot_reply(
+            update.message,
             "Вы уже зарегистрированы!\n\n"
             "Поделитесь своими ощущениями от использования микросервиса — "
             "можно текстом, голосовым, фото, видео или файлом."
@@ -212,7 +221,8 @@ async def _finish_registration(update: Update, context: ContextTypes.DEFAULT_TYP
     user_manager.save_profile(user.id, profile)
     await researcher_bridge.ensure_topic(context, user.id)
 
-    await update.message.reply_text(
+    await _bot_reply(
+        update.message,
         "✅ Анкета сохранена, спасибо!\n\n"
         "Теперь поделитесь ощущениями от использования микросервиса.\n"
         "Можно текстом, голосовым, фото, видео или файлом.",
@@ -225,7 +235,7 @@ async def _finish_registration(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def receive_text_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await _record_and_forward(update, context, {"type": "text", "text": update.message.text.strip()})
-    await update.message.reply_text("Записал! Присылайте ещё.")
+    await _bot_reply(update.message, "Записал! Присылайте ещё.")
     return WAIT_FEEDBACK
 
 
@@ -247,7 +257,8 @@ async def receive_voice_feedback(update: Update, context: ContextTypes.DEFAULT_T
     line = await _transcribe_and_record(update, save_path, entry)
     await _record_and_forward(update, context, entry)
 
-    await update.message.reply_text(
+    await _bot_reply(
+        update.message,
         f"Голосовое получено ({voice.duration} сек).\n\n{line}\n\nПрисылайте ещё."
     )
     return WAIT_FEEDBACK
@@ -300,7 +311,8 @@ async def _process_av(
         line = "(транскрибация отключена — нет YANDEX_API_KEY / YANDEX_FOLDER_ID в .env)"
 
     await _record_and_forward(update, context, entry)
-    await update.message.reply_text(
+    await _bot_reply(
+        update.message,
         f"{reply_prefix} ({media_obj.duration} сек).\n\n{line}\n\nПрисылайте ещё."
     )
     return WAIT_FEEDBACK
@@ -358,7 +370,7 @@ async def receive_photo_feedback(update: Update, context: ContextTypes.DEFAULT_T
         entry["caption"] = update.message.caption
     await _record_and_forward(update, context, entry)
 
-    await update.message.reply_text("Фото получено.\n\nПрисылайте ещё.")
+    await _bot_reply(update.message, "Фото получено.\n\nПрисылайте ещё.")
     return WAIT_FEEDBACK
 
 
@@ -381,9 +393,7 @@ async def receive_document_feedback(update: Update, context: ContextTypes.DEFAUL
     await _record_and_forward(update, context, entry)
 
     display_name = (doc.file_name or "файл")[:100]
-    await update.message.reply_text(
-        f"Файл «{display_name}» получен.\n\nПрисылайте ещё."
-    )
+    await _bot_reply(update.message, f"Файл «{display_name}» получен.\n\nПрисылайте ещё.")
     return WAIT_FEEDBACK
 
 
@@ -392,7 +402,8 @@ async def receive_document_feedback(update: Update, context: ContextTypes.DEFAUL
 async def stop_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Диалог намеренно НЕ завершается: бот остаётся на связи, чтобы в любой момент
     # принять новый отзыв или ответ на уточняющий вопрос исследователя.
-    await update.message.reply_text(
+    await _bot_reply(
+        update.message,
         "Спасибо! Я остаюсь на связи — присылайте новые мысли в любой момент, "
         "и отвечайте, если что-то уточню."
     )

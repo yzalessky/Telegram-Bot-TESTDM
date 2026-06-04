@@ -13,6 +13,7 @@ bot_data (persisted через PicklePersistence):
   msgmap:               {group_message_id: {user_id, feedback_id}} — сообщение в теме → фидбек
   pending_clarification:{user_id: question_id}              — следующий ответ юзера = ответ на вопрос
 """
+import html
 import logging
 import os
 
@@ -124,28 +125,37 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
         s = await coro
         sent_ids.append(s.message_id)
 
+    header = "<b>Сообщение пользователя:</b>"
     try:
         etype = entry.get("type")
         caption = message.caption or None
         if etype == "text":
-            await _post(bot.send_message(gid, entry.get("text", ""), message_thread_id=thread_id))
-        elif message.voice:
-            await _post(bot.send_voice(gid, message.voice.file_id, message_thread_id=thread_id))
-        elif message.audio:
-            await _post(bot.send_audio(gid, message.audio.file_id, caption=caption, message_thread_id=thread_id))
-        elif message.video:
-            await _post(bot.send_video(gid, message.video.file_id, caption=caption, message_thread_id=thread_id))
-        elif message.video_note:
-            await _post(bot.send_video_note(gid, message.video_note.file_id, message_thread_id=thread_id))
-        elif message.photo:
-            await _post(bot.send_photo(gid, message.photo[-1].file_id, caption=caption, message_thread_id=thread_id))
-        elif message.document:
-            await _post(bot.send_document(gid, message.document.file_id, caption=caption, message_thread_id=thread_id))
+            await _post(bot.send_message(
+                gid, f"{header}\n\n{html.escape(entry.get('text', ''), quote=False)}",
+                message_thread_id=thread_id, parse_mode="HTML",
+            ))
+        else:
+            await _post(bot.send_message(gid, header, message_thread_id=thread_id, parse_mode="HTML"))
+            if message.voice:
+                await _post(bot.send_voice(gid, message.voice.file_id, message_thread_id=thread_id))
+            elif message.audio:
+                await _post(bot.send_audio(gid, message.audio.file_id, caption=caption, message_thread_id=thread_id))
+            elif message.video:
+                await _post(bot.send_video(gid, message.video.file_id, caption=caption, message_thread_id=thread_id))
+            elif message.video_note:
+                await _post(bot.send_video_note(gid, message.video_note.file_id, message_thread_id=thread_id))
+            elif message.photo:
+                await _post(bot.send_photo(gid, message.photo[-1].file_id, caption=caption, message_thread_id=thread_id))
+            elif message.document:
+                await _post(bot.send_document(gid, message.document.file_id, caption=caption, message_thread_id=thread_id))
 
-        # отдельной строкой — расшифровка (чтобы исследователь читал текст голоса/видео)
-        transcript = entry.get("transcript_clean") or entry.get("transcript")
-        if transcript and etype != "text":
-            await _post(bot.send_message(gid, f"📝 {transcript}", message_thread_id=thread_id))
+            # отдельной строкой — расшифровка (чтобы исследователь читал текст голоса/видео)
+            transcript = entry.get("transcript_clean") or entry.get("transcript")
+            if transcript:
+                await _post(bot.send_message(
+                    gid, f"📝 {html.escape(transcript, quote=False)}",
+                    message_thread_id=thread_id, parse_mode="HTML",
+                ))
     except Exception:
         logger.exception("forward_feedback failed for user %s", user_id)
 
@@ -178,7 +188,10 @@ async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, pare
     delivered = True
     try:
         await context.bot.send_message(
-            user_id, f"💬 Вопрос от исследователя:\n\n{text}", reply_parameters=reply_params
+            user_id,
+            f"<b>Сообщение от исследователя:</b>\n\n{html.escape(text, quote=False)}",
+            parse_mode="HTML",
+            reply_parameters=reply_params,
         )
     except Exception:
         delivered = False
