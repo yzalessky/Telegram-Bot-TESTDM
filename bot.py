@@ -64,10 +64,10 @@ async def _chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     msg = update.effective_message
     if chat is None or msg is None:
         return
-    text = f"chat_id: `{chat.id}`\nтип: {chat.type}"
+    lines = [f"chat_id: {chat.id}", f"тип: {chat.type}"]
     if msg.message_thread_id:
-        text += f"\ntopic_thread_id: {msg.message_thread_id}"
-    await msg.reply_text(text, parse_mode="Markdown")
+        lines.append(f"topic_thread_id: {msg.message_thread_id}")
+    await msg.reply_text("\n".join(lines))
 
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
