@@ -23,6 +23,7 @@ CREDENTIALS_PATH = os.path.join(_HERE, "credentials.json")
 _service = None
 _folder_cache: dict[str, str] = {}
 _cache_lock = threading.Lock()  # защита от гонок при создании папок параллельными аплоадами
+_op_lock = threading.Lock()     # сериализует все операции с Drive: один token-refresh за раз
 
 
 def is_configured() -> bool:
@@ -35,14 +36,18 @@ def _escape_query(value: str) -> str:
 
 
 def _get_service():
+    """Создаёт (и кеширует) Drive-сервис. Вызывается только под _op_lock — см. _upload_blocking."""
     global _service
     if _service is not None:
         return _service
     creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        with open(TOKEN_PATH, "w", encoding="utf-8") as f:
+        # атомарная запись токена: пишем во временный файл, затем заменяем
+        tmp = TOKEN_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(creds.to_json())
+        os.replace(tmp, TOKEN_PATH)
     _service = build("drive", "v3", credentials=creds, cache_discovery=False)
     return _service
 
@@ -76,27 +81,33 @@ def _find_or_create_folder(service, parent_id: str, name: str) -> str:
 
 
 def _upload_blocking(local_path: str, drive_subpath: str) -> None:
-    """Заливает/обновляет файл в Drive по пути {ROOT_FOLDER}/{drive_subpath}."""
-    service = _get_service()
-    root_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
+    """Заливает/обновляет файл в Drive по пути {ROOT_FOLDER}/{drive_subpath}.
 
-    parts = drive_subpath.replace("\\", "/").split("/")
-    *folders, filename = parts
+    Вся операция — под _op_lock: заливки идут по одной, чтобы параллельные потоки
+    не обновляли OAuth-токен одновременно (Google проворачивает refresh-токен и
+    рушит конкурентные обновления ошибкой invalid_grant).
+    """
+    with _op_lock:
+        service = _get_service()
+        root_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
 
-    parent_id = root_id
-    for folder_name in folders:
-        parent_id = _find_or_create_folder(service, parent_id, folder_name)
+        parts = drive_subpath.replace("\\", "/").split("/")
+        *folders, filename = parts
 
-    query = f"name='{_escape_query(filename)}' and '{parent_id}' in parents and trashed=false"
-    result = service.files().list(q=query, fields="files(id)", pageSize=1).execute()
-    existing = result.get("files", [])
+        parent_id = root_id
+        for folder_name in folders:
+            parent_id = _find_or_create_folder(service, parent_id, folder_name)
 
-    media = MediaFileUpload(local_path, resumable=False)
-    if existing:
-        service.files().update(fileId=existing[0]["id"], media_body=media).execute()
-    else:
-        meta = {"name": filename, "parents": [parent_id]}
-        service.files().create(body=meta, media_body=media, fields="id").execute()
+        query = f"name='{_escape_query(filename)}' and '{parent_id}' in parents and trashed=false"
+        result = service.files().list(q=query, fields="files(id)", pageSize=1).execute()
+        existing = result.get("files", [])
+
+        media = MediaFileUpload(local_path, resumable=False)
+        if existing:
+            service.files().update(fileId=existing[0]["id"], media_body=media).execute()
+        else:
+            meta = {"name": filename, "parents": [parent_id]}
+            service.files().create(body=meta, media_body=media, fields="id").execute()
 
 
 async def _upload_async(local_path: str, drive_subpath: str) -> None:
