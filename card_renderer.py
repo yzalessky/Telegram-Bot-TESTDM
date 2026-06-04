@@ -96,8 +96,14 @@ def _render_entry(n: int, entry: dict) -> list[str]:
             lines += [f"[{file.rsplit('/', 1)[-1]}]({file})", ""]
         if entry.get("caption"):
             lines += [f"**Подпись:** {_oneline(entry['caption'])}", ""]
-        if entry.get("transcript"):
-            lines += [f"> **Расшифровка:** {_oneline(entry['transcript'])}", ""]
+        clean = entry.get("transcript_clean")
+        raw = entry.get("transcript")
+        if clean:
+            lines += [f"> **Расшифровка:** {_oneline(clean)}", ""]
+            if raw and _oneline(raw) != _oneline(clean):
+                lines += [f"> _STT-оригинал: {_oneline(raw)}_", ""]
+        elif raw:
+            lines += [f"> **Расшифровка:** {_oneline(raw)}", ""]
         elif entry.get("transcript_error"):
             lines += ["> _Расшифровка не удалась._", ""]
 
