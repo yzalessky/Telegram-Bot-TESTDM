@@ -58,6 +58,18 @@ logger = logging.getLogger(__name__)
 PERSISTENCE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_state.pickle")
 
 
+async def _chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Утилита настройки: /chatid отвечает chat_id текущего чата (и id темы, если в теме)."""
+    chat = update.effective_chat
+    msg = update.effective_message
+    if chat is None or msg is None:
+        return
+    text = f"chat_id: `{chat.id}`\nтип: {chat.type}"
+    if msg.message_thread_id:
+        text += f"\ntopic_thread_id: {msg.message_thread_id}"
+    await msg.reply_text(text, parse_mode="Markdown")
+
+
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Глобальный обработчик исключений — логирует и (если возможно) сообщает пользователю."""
     logger.exception("Unhandled exception", exc_info=context.error)
@@ -106,6 +118,8 @@ def main() -> None:
     )
 
     app.add_handler(conv)
+    # Утилита: /chatid работает в любом чате (для получения RESEARCHER_GROUP_ID).
+    app.add_handler(CommandHandler("chatid", _chatid_command), group=1)
 
     # Мост исследователей (group=1): команды/сообщения в групповом чате тем.
     # Подключается только если задан RESEARCHER_GROUP_ID.
