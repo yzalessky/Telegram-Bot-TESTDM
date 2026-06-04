@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _GENDER_KB = ReplyKeyboardMarkup([["Мужской", "Женский"]], one_time_keyboard=True, resize_keyboard=True)
 _YES_NO_KB = ReplyKeyboardMarkup([["Да", "Нет"]], one_time_keyboard=True, resize_keyboard=True)
 _EXT_PATTERN = re.compile(r"^[a-zA-Z0-9]{1,10}$")
-_BOT_PREFIX = "<b>Бот-помощник группы исследователей:</b>"
+_BOT_PREFIX = "<b>Бот-помощник:</b>"
 
 
 async def _bot_reply(message, text: str, **kwargs):

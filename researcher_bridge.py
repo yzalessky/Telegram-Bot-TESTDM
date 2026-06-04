@@ -125,7 +125,7 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
         s = await coro
         sent_ids.append(s.message_id)
 
-    header = "<b>Сообщение пользователя:</b>"
+    header = "<b>Респондент:</b>"
     # Если это ответ на уточнение — первое сообщение делаем reply'ем на вопрос в теме.
     first_reply = None
     if entry.get("role") == "clarification_answer":
@@ -210,7 +210,7 @@ async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, pare
     profile = user_manager.get_profile(user_id) or {}
     thread_id = profile.get("topic_id")
     if thread_id:
-        note = "✅ Вопрос отправлен респонденту." if delivered else "⚠️ Не удалось доставить вопрос респонденту."
+        note = "✅ Сообщение отправлено респонденту." if delivered else "⚠️ Не удалось доставить сообщение респонденту."
         try:
             await context.bot.send_message(_group_id(), note, message_thread_id=int(thread_id))
         except Exception:
