@@ -19,14 +19,14 @@ import user_manager
 def main() -> None:
     if not drive_sync.is_configured():
         raise SystemExit(
-            "❌ Drive не настроен.\n"
+            "Drive не настроен.\n"
             "Проверьте что в .env задан GOOGLE_DRIVE_FOLDER_ID "
             "и в папке проекта лежит token.json (запустите auth_drive.py)."
         )
 
     users_dir = user_manager.USERS_DIR
     if not os.path.isdir(users_dir):
-        raise SystemExit(f"❌ Папка {users_dir} не существует")
+        raise SystemExit(f"Папка {users_dir} не существует")
 
     files: list[tuple[str, str]] = []
     for root, _dirs, names in os.walk(users_dir):
@@ -47,10 +47,10 @@ def main() -> None:
     for i, (local, rel) in enumerate(files, 1):
         try:
             drive_sync.upload_file_sync(local, rel)
-            print(f"  [{i}/{total}] ✅ {rel}")
+            print(f"  [{i}/{total}] OK   {rel}")
             ok += 1
         except Exception as exc:
-            print(f"  [{i}/{total}] ❌ {rel}: {exc}")
+            print(f"  [{i}/{total}] FAIL {rel}: {exc}")
             fail += 1
 
     print(f"\nГотово. Успешно: {ok}, ошибок: {fail}")
