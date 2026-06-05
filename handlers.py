@@ -30,6 +30,11 @@ _GENDER_KB = ReplyKeyboardMarkup([["Мужской", "Женский"]], one_tim
 _YES_NO_KB = ReplyKeyboardMarkup([["Да", "Нет"]], one_time_keyboard=True, resize_keyboard=True)
 _EXT_PATTERN = re.compile(r"^[a-zA-Z0-9]{1,10}$")
 _BOT_PREFIX = "<b>Бот-помощник:</b>"
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024  # лимит публичного Bot API на скачивание файла
+_MEDIA_HUMAN = {
+    "video": "видео", "video_note": "кружок", "audio": "аудиофайл",
+    "document": "документ", "voice": "голосовое", "photo": "фото",
+}
 
 
 async def _bot_reply(message, text: str, **kwargs):
@@ -96,6 +101,41 @@ async def _record_and_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
     fid = user_manager.append_feedback_entry(user_id, entry)
     await researcher_bridge.forward_feedback(context, user_id, fid, update.message, entry)
     return fid
+
+
+def _oversize_message(type_label: str, mb: int) -> str:
+    if type_label in ("video", "video_note"):
+        return (f"Видео получилось тяжёлым ({mb} МБ) — Telegram не отдаёт боту файлы больше 20 МБ.\n\n"
+                "В лимит обычно влезает 30–60 секунд видео (для высокого качества — ~15–30 сек). "
+                "Снимите покороче, пришлите в меньшем качестве или обрежьте фрагмент.")
+    if type_label == "audio":
+        return (f"Аудио тяжелее 20 МБ ({mb} МБ) — Telegram не отдаёт такие боту.\n\n"
+                "В лимит влезает примерно 15–20 минут при обычном качестве. Пришлите фрагмент покороче.")
+    if type_label == "document":
+        return (f"Файл тяжелее 20 МБ ({mb} МБ) — Telegram не отдаёт боту файлы такого размера.\n\n"
+                "Пришлите файл до 20 МБ.")
+    return (f"Файл тяжёлый ({mb} МБ) — Telegram не отдаёт боту файлы больше 20 МБ.\n\n"
+            "Пришлите вариант полегче.")
+
+
+async def _reject_if_too_big(update: Update, context: ContextTypes.DEFAULT_TYPE, media_obj, type_label: str) -> bool:
+    """Файл > 20 МБ: вежливый отказ + заглушка в данные + пометка исследователю.
+    Возвращает True, если обработку надо прекратить (файл нельзя скачать)."""
+    size = getattr(media_obj, "file_size", None)
+    if not size or size <= MAX_DOWNLOAD_BYTES:
+        return False
+    mb = round(size / 1024 / 1024)
+    await _bot_reply(update.message, _oversize_message(type_label, mb))
+    fid = user_manager.append_feedback_entry(
+        update.effective_user.id,
+        {"type": "oversized", "media_type": type_label, "size_bytes": size},
+    )
+    await researcher_bridge.forward_note(
+        context, update.effective_user.id, fid,
+        f"⚠️ Респондент пытался прислать {_MEDIA_HUMAN.get(type_label, 'файл')} "
+        f"(~{mb} МБ) — не захвачено: превышен лимит Telegram 20 МБ.",
+    )
+    return True
 
 
 # --- регистрация ----------------------------------------------------------
@@ -245,6 +285,9 @@ async def receive_voice_feedback(update: Update, context: ContextTypes.DEFAULT_T
     voice = update.message.voice
     user_id = update.effective_user.id
 
+    if await _reject_if_too_big(update, context, voice, "voice"):
+        return WAIT_FEEDBACK
+
     filename = f"voice_{_ts()}.ogg"
     save_path = os.path.join(user_manager.media_dir(user_id, "voice"), filename)
     await _download(voice, save_path)
@@ -280,6 +323,9 @@ async def _process_av(
 ) -> int:
     """Универсальный пайплайн: скачать → ffmpeg → транскрибировать → записать → ответить."""
     user_id = update.effective_user.id
+
+    if await _reject_if_too_big(update, context, media_obj, type_label):
+        return WAIT_FEEDBACK
 
     source_filename = f"{base_name}{source_ext}"
     source_path = os.path.join(user_manager.media_dir(user_id, subfolder), source_filename)
@@ -361,6 +407,9 @@ async def receive_photo_feedback(update: Update, context: ContextTypes.DEFAULT_T
     photo = update.message.photo[-1]  # самое большое разрешение
     user_id = update.effective_user.id
 
+    if await _reject_if_too_big(update, context, photo, "photo"):
+        return WAIT_FEEDBACK
+
     filename = f"photo_{_ts()}.jpg"
     save_path = os.path.join(user_manager.media_dir(user_id, "photo"), filename)
     await _download(photo, save_path)
@@ -379,6 +428,9 @@ async def receive_photo_feedback(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_document_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     doc = update.message.document
     user_id = update.effective_user.id
+
+    if await _reject_if_too_big(update, context, doc, "document"):
+        return WAIT_FEEDBACK
 
     ext = _safe_ext(doc.file_name, default=".bin")
     filename = f"doc_{_ts()}{ext}"

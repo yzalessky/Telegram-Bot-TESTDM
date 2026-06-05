@@ -13,6 +13,7 @@ _TYPE_LABELS = {
     "video_note": "Кругляш",
     "photo": "Фото",
     "document": "Документ",
+    "oversized": "Не захвачено (>20 МБ)",
 }
 
 
@@ -90,6 +91,11 @@ def _render_entry(n: int, entry: dict) -> list[str]:
         name = entry.get("original_name") or (file.rsplit("/", 1)[-1] if file else "файл")
         if file:
             lines += [f"[{name}]({file})", ""]
+    elif etype == "oversized":
+        mt = entry.get("media_type", "файл")
+        sz = entry.get("size_bytes")
+        mb = f"{round(sz / 1024 / 1024)} МБ" if sz else "?"
+        lines += [f"_Респондент пытался прислать {mt} (~{mb}) — не захвачено (превышен лимит Telegram 20 МБ)._", ""]
     else:
         # voice / audio / video / video_note / unknown
         if file:

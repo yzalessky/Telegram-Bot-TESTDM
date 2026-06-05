@@ -170,6 +170,23 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
         msgmap[mid] = {"user_id": user_id, "feedback_id": feedback_id}
 
 
+async def forward_note(context: ContextTypes.DEFAULT_TYPE, user_id: int, feedback_id, text: str):
+    """Служебная текстовая пометка в тему респондента (напр. про oversized-файл)."""
+    if not is_enabled():
+        return
+    thread_id = await ensure_topic(context, user_id)
+    if not thread_id:
+        return
+    try:
+        sent = await context.bot.send_message(_group_id(), text, message_thread_id=thread_id)
+        if feedback_id:
+            context.bot_data.setdefault("msgmap", {})[sent.message_id] = {
+                "user_id": user_id, "feedback_id": feedback_id,
+            }
+    except Exception:
+        logger.exception("forward_note failed for user %s", user_id)
+
+
 async def _ask(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str, parent_id, question_msg_id=None):
     """Логирует уточняющий вопрос, доставляет респонденту, ставит pending."""
     text = (text or "").strip()
