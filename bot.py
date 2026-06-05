@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -48,9 +49,42 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-# Чтобы Google API клиент не засорял лог INFO-сообщениями
+# Сторонние клиенты не должны засорять лог INFO-сообщениями.
+# httpx логирует каждый запрос ВМЕСТЕ С ТОКЕНОМ в URL → глушим до WARNING (вариант A).
 logging.getLogger("googleapiclient").setLevel(logging.WARNING)
 logging.getLogger("google_auth_httplib2").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+# Вариант C: маскируем секреты в ЛЮБЫХ лог-записях (включая редкие трейсбеки ошибок).
+_SECRET_RE = re.compile(r"\d{6,}:[A-Za-z0-9_-]{30,}")  # шаблон Telegram-токена
+
+
+class _RedactSecretsFilter(logging.Filter):
+    """Заменяет токены/ключи на <REDACTED> в сообщениях лога."""
+
+    def __init__(self, literals):
+        super().__init__()
+        self._literals = [s for s in literals if s]
+
+    def _scrub(self, text: str) -> str:
+        for secret in self._literals:
+            text = text.replace(secret, "<REDACTED>")
+        return _SECRET_RE.sub("<REDACTED>", text)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self._scrub(record.msg)
+        if record.args:
+            record.args = tuple(
+                self._scrub(a) if isinstance(a, str) else a for a in record.args
+            )
+        return True
+
+
+_redactor = _RedactSecretsFilter([os.environ.get("BOT_TOKEN"), os.environ.get("YANDEX_API_KEY")])
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_redactor)
 
 logger = logging.getLogger(__name__)
 
