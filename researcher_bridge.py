@@ -41,6 +41,22 @@ def group_id():
     return _group_id()
 
 
+def _split_text(text: str, size: int = 3500) -> list[str]:
+    """Режет длинный текст на куски ≤ size (по границе слова) — для лимита Telegram 4096."""
+    chunks = []
+    text = text.strip()
+    while text:
+        if len(text) <= size:
+            chunks.append(text)
+            break
+        cut = text.rfind(" ", 0, size)
+        if cut <= 0:
+            cut = size
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip()
+    return chunks
+
+
 def _topic_name(profile: dict, user_id: int) -> str:
     parts = [profile.get("name") or "Респондент"]
     if profile.get("username"):
@@ -156,13 +172,16 @@ async def forward_feedback(context: ContextTypes.DEFAULT_TYPE, user_id: int, fee
             elif message.document:
                 await _post(bot.send_document(gid, message.document.file_id, caption=caption, message_thread_id=thread_id))
 
-            # отдельной строкой — расшифровка (чтобы исследователь читал текст голоса/видео)
+            # отдельной строкой — расшифровка ПОЛНОСТЬЮ (длинная режется на несколько сообщений)
             transcript = entry.get("transcript_clean") or entry.get("transcript")
             if transcript:
-                await _post(bot.send_message(
-                    gid, f"📝 {html.escape(transcript, quote=False)}",
-                    message_thread_id=thread_id, parse_mode="HTML",
-                ))
+                parts = _split_text(transcript, 3500)
+                for i, part in enumerate(parts):
+                    prefix = "📝 " if i == 0 else ""
+                    await _post(bot.send_message(
+                        gid, f"{prefix}{html.escape(part, quote=False)}",
+                        message_thread_id=thread_id, parse_mode="HTML",
+                    ))
     except Exception:
         logger.exception("forward_feedback failed for user %s", user_id)
 

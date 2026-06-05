@@ -43,6 +43,17 @@ async def _bot_reply(message, text: str, **kwargs):
     return await message.reply_text(f"{_BOT_PREFIX}\n\n{html.escape(text, quote=False)}", **kwargs)
 
 
+def _clip(text: str, limit: int = 500) -> str:
+    """Превью для чата: обрезает по границе слова, полный текст — в card.md."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    cut = text.rfind(" ", 0, limit)
+    if cut <= 0:
+        cut = limit
+    return text[:cut].rstrip() + "… (полностью в карточке)"
+
+
 def _ts() -> str:
     """Метка времени с миллисекундами — чтобы избежать коллизий при быстрых сообщениях."""
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -81,7 +92,9 @@ async def _transcribe_and_record(update: Update, audio_path: str, entry: dict) -
         await update.message.chat.send_action(ChatAction.TYPING)
         transcript = await transcriber.transcribe_file(audio_path)
         entry["transcript"] = transcript
-        return f"Распознал: «{transcript}»" if transcript else "(речь не распознана)"
+        if not transcript:
+            return "(речь не распознана)"
+        return f"Распознал: «{_clip(transcript, 500)}»"
     except Exception as exc:
         logger.exception("Transcription failed for %s", audio_path)
         entry["transcript_error"] = str(exc)
