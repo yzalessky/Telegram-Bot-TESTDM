@@ -31,7 +31,7 @@ def main() -> None:
     with open(TOKEN_PATH, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
 
-    print(f"\n✅ Token сохранён в {TOKEN_PATH}")
+    print(f"\n[OK] Token сохранён в {TOKEN_PATH}")
     print("Теперь можно запускать bot.py — файлы будут автоматически заливаться в Google Drive.")
 
 
